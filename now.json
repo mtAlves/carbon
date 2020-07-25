@@ -26,13 +26,6 @@
       }
     },
     {
-      "src": "^/service-worker.js$",
-      "dest": "/_next/static/service-worker.js",
-      "headers": {
-        "Service-Worker-Allowed": "/"
-      }
-    },
-    {
       "src": "/",
       "continue": true,
       "headers": {
