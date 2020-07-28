@@ -1,5 +1,5 @@
 // Theirs
-import React from 'react'
+import React, { useContext, useState, useEffect } from 'react'
 import domtoimage from 'dom-to-image'
 import Dropzone from 'dropperx'
 import debounce from 'lodash.debounce'
@@ -45,85 +45,87 @@ const SnippetToolbar = dynamic(() => import('./SnippetToolbar'), {
 const getConfig = omit(['code'])
 const unsplashPhotographerCredit = /\n\n\/\/ Photo by.+?on Unsplash/
 
-class Editor extends React.Component {
-  static contextType = ApiContext
+const Editor = (props) => {
+  const context = useContext(ApiContext)
+  const [state, setState] = useState({ loading: true })
+  const [isSafari, setIsSafari] = useState(false)
+  const [isFirefox, setIsFirefox] = useState(false)
 
-  state = {
-    ...DEFAULT_SETTINGS,
-    ...this.props.snippet,
-    loading: true,
-  }
-
-  async componentDidMount() {
-    const { queryState } = getRouteState(this.props.router)
-
+  useEffect(() => {
+    const { queryState } = getRouteState(props.router)
     const newState = {
+      ...DEFAULT_SETTINGS,
       // IDEA: we could create an interface for loading this config, so that it looks identical
       // whether config is loaded from localStorage, gist, or even something like IndexDB
       // Load options from gist or localStorage
-      ...(this.props.snippet ? null : getSettings(localStorage)),
+      ...(props.snippet ? props.snippet : getSettings(localStorage)),
       // and then URL params
       ...queryState,
+      codeSnapshots: [],
       loading: false,
     }
-
+  
     // Makes sure the slash in 'application/X' is decoded
     if (newState.language) {
       newState.language = unescapeHtml(newState.language)
     }
-
+  
     if (newState.fontFamily && !FONTS.find(({ id }) => id === newState.fontFamily)) {
       newState.fontFamily = DEFAULT_SETTINGS.fontFamily
     }
-
-    this.setState(newState)
-
-    this.isSafari =
+    setState({...state, ...newState})
+  
+    setIsSafari(
       window.navigator &&
       window.navigator.userAgent.indexOf('Safari') !== -1 &&
       window.navigator.userAgent.indexOf('Chrome') === -1
-    this.isFirefox =
+    )
+    setIsFirefox(
       window.navigator &&
       window.navigator.userAgent.indexOf('Firefox') !== -1 &&
       window.navigator.userAgent.indexOf('Chrome') === -1
-  }
+    )
+   }, [])
+  
+  const carbonNode = React.createRef()
 
-  carbonNode = React.createRef()
+  const getTheme = () => props.themes.find(t => t.id === state.theme) || DEFAULT_THEME
 
-  getTheme = () => this.props.themes.find(t => t.id === this.state.theme) || DEFAULT_THEME
-
-  onUpdate = debounce(updates => this.props.onUpdate(updates), 750, {
+  const onUpdate = debounce(updates => props.onUpdate(updates), 750, {
     trailing: true,
     leading: true,
   })
 
-  updateState = updates => this.setState(updates, () => this.onUpdate(this.state))
+  const updateState = updates => setState(updates, () => onUpdate(state))
 
-  updateCode = code => this.updateState({ code })
-  updateWidth = width => this.setState({ widthAdjustment: false, width })
+  const updateCode = code => updateState({
+    code,
+    codeSnapshots: [...state.codeSnapshots, code]
+  })
+  const updateWidth = width => setState({ widthAdjustment: false, width })
 
-  getCarbonImage = async (
+  const getCarbonImage = async (
     {
       format,
       type,
-      squared = this.state.squaredImage,
-      exportSize = (EXPORT_SIZES_HASH[this.state.exportSize] || DEFAULT_EXPORT_SIZE).value,
+      squared = state.squaredImage,
+      exportSize = (EXPORT_SIZES_HASH[state.exportSize] || DEFAULT_EXPORT_SIZE).value,
       includeTransparentRow = false,
     } = { format: 'png' }
   ) => {
     // if safari, get image from api
     const isPNG = format !== 'svg'
-    if (this.context.image && this.isSafari && isPNG) {
-      const themeConfig = this.getTheme()
+    if (context.image && isSafari && isPNG) {
+      const themeConfig = getTheme()
       // pull from custom theme highlights, or state highlights
       const encodedState = serializeState({
-        ...this.state,
-        highlights: { ...themeConfig.highlights, ...this.state.highlights },
+        ...state,
+        highlights: { ...themeConfig.highlights, ...state.highlights },
       })
-      return this.context.image(encodedState)
+      return context.image(encodedState)
     }
 
-    const node = this.carbonNode.current
+    const node = carbonNode.current
 
     const map = new Map()
     const undoMap = value => {
@@ -149,7 +151,7 @@ class Editor extends React.Component {
       style: {
         transform: `scale(${exportSize})`,
         'transform-origin': 'center',
-        background: squared ? this.state.backgroundColor : 'none',
+        background: squared ? state.backgroundColor : 'none',
       },
       filter: n => {
         if (n.className) {
@@ -171,7 +173,7 @@ class Editor extends React.Component {
     }
 
     // current font-family used
-    const fontFamily = this.state.fontFamily
+    const fontFamily = state.fontFamily
     try {
       // TODO consolidate type/format to only use one param
       if (type === 'objectURL') {
@@ -213,22 +215,22 @@ class Editor extends React.Component {
     }
   }
 
-  tweet = () => {
-    this.getCarbonImage({ format: 'png', includeTransparentRow: true }).then(
-      this.context.tweet.bind(null, this.state.code || DEFAULT_CODE)
+  const tweet = () => {
+    getCarbonImage({ format: 'png', includeTransparentRow: true }).then(
+      context.tweet.bind(null, state.code || DEFAULT_CODE)
     )
   }
 
-  exportImage = (format = 'png', options = {}) => {
+  const exportImage = (format = 'png', options = {}) => {
     const link = document.createElement('a')
 
-    const prefix = options.filename || this.state.name || 'carbon'
+    const prefix = options.filename || state.name || 'carbon'
 
-    return this.getCarbonImage({ format, type: 'objectURL' }).then(url => {
+    return getCarbonImage({ format, type: 'objectURL' }).then(url => {
       if (format !== 'open') {
         link.download = `${prefix}.${format}`
       }
-      if (this.isFirefox) {
+      if (isFirefox) {
         link.target = '_blank'
       }
       link.href = url
@@ -238,8 +240,8 @@ class Editor extends React.Component {
     })
   }
 
-  copyImage = () =>
-    this.getCarbonImage({ format: 'png', type: 'blob' }).then(blob =>
+  const copyImage = () =>
+    getCarbonImage({ format: 'png', type: 'blob' }).then(blob =>
       navigator.clipboard.write([
         new window.ClipboardItem({
           'image/png': blob,
@@ -247,40 +249,40 @@ class Editor extends React.Component {
       ])
     )
 
-  updateSetting = (key, value) => {
-    this.updateState({ [key]: value })
+  const updateSetting = (key, value) => {
+    updateState({ [key]: value })
     if (Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS, key)) {
-      this.updateState({ preset: null })
+      updateState({ preset: null })
     }
   }
 
-  resetDefaultSettings = () => {
-    this.updateState(DEFAULT_SETTINGS)
-    this.props.onReset()
+  const resetDefaultSettings = () => {
+    updateState(DEFAULT_SETTINGS)
+    props.onReset()
   }
 
-  onDrop = ([file]) => {
+  const onDrop = ([file]) => {
     if (file.type.split('/')[0] === 'image') {
-      this.updateState({
+      updateState({
         backgroundImage: file.content,
         backgroundImageSelection: null,
         backgroundMode: 'image',
         preset: null,
       })
     } else {
-      this.updateState({ code: file.content, language: 'auto' })
+      updateState({ code: file.content, language: 'auto' })
     }
   }
 
-  updateLanguage = language => {
+  const updateLanguage = language => {
     if (language) {
-      this.updateSetting('language', language.mime || language.mode)
+      updateSetting('language', language.mime || language.mode)
     }
   }
 
-  updateBackground = ({ photographer, ...changes } = {}) => {
+  const updateBackground = ({ photographer, ...changes } = {}) => {
     if (photographer) {
-      this.updateState(({ code = DEFAULT_CODE }) => ({
+      updateState(({ code = DEFAULT_CODE }) => ({
         ...changes,
         code:
           code.replace(unsplashPhotographerCredit, '') +
@@ -288,63 +290,62 @@ class Editor extends React.Component {
         preset: null,
       }))
     } else {
-      this.updateState({ ...changes, preset: null })
+      updateState({ ...changes, preset: null })
     }
   }
 
-  updateTheme = theme => this.updateState({ theme })
-  updateHighlights = updates =>
-    this.setState(({ highlights = {} }) => ({
+  const updateTheme = theme => updateState({ theme })
+  const updateHighlights = updates =>
+    setState(({ highlights = {} }) => ({
       highlights: {
         ...highlights,
         ...updates,
       },
     }))
 
-  createTheme = theme => {
-    this.props.updateThemes(themes => [theme, ...themes])
-    this.updateTheme(theme.id)
+  const createTheme = theme => {
+    props.updateThemes(themes => [theme, ...themes])
+    updateTheme(theme.id)
   }
 
-  removeTheme = id => {
-    this.props.updateThemes(themes => themes.filter(t => t.id !== id))
-    if (this.state.theme.id === id) {
-      this.updateTheme(DEFAULT_THEME.id)
+  const removeTheme = id => {
+    props.updateThemes(themes => themes.filter(t => t.id !== id))
+    if (state.theme.id === id) {
+      updateTheme(DEFAULT_THEME.id)
     }
   }
 
-  applyPreset = ({ id: preset, ...settings }) => this.updateState({ preset, ...settings })
+  const applyPreset = ({ id: preset, ...settings }) => updateState({ preset, ...settings })
 
-  format = () =>
-    formatCode(this.state.code)
-      .then(this.updateCode)
+  const format = () =>
+    formatCode(state.code)
+      .then(updateCode)
       .catch(() => {
         // create toast here in the future
       })
 
-  handleSnippetCreate = () =>
-    this.context.snippet
-      .create(this.state)
-      .then(data => this.props.setSnippet(data))
+  const handleSnippetCreate = () =>
+    context.snippet
+      .create(state)
+      .then(data => props.setSnippet(data))
       .then(() =>
-        this.props.setToasts({
+        props.setToasts({
           type: 'SET',
           toasts: [{ children: 'Snippet duplicated!', timeout: 3000 }],
         })
       )
 
-  handleSnippetDelete = () =>
-    this.context.snippet
-      .delete(this.props.snippet.id)
-      .then(() => this.props.setSnippet(null))
+  const handleSnippetDelete = () =>
+    context.snippet
+      .delete(props.snippet.id)
+      .then(() => props.setSnippet(null))
       .then(() =>
-        this.props.setToasts({
+        props.setToasts({
           type: 'SET',
           toasts: [{ children: 'Snippet deleted', timeout: 3000 }],
         })
       )
 
-  render() {
     const {
       highlights,
       language,
@@ -352,12 +353,12 @@ class Editor extends React.Component {
       backgroundImage,
       backgroundMode,
       code,
-      exportSize,
-    } = this.state
+      exportSize
+    } = state
 
-    const config = getConfig(this.state)
+    const config = getConfig(state)
 
-    const theme = this.getTheme()
+    const theme = getTheme()
 
     return (
       <div className="editor">
@@ -365,11 +366,11 @@ class Editor extends React.Component {
           <Themes
             theme={theme}
             highlights={highlights}
-            update={this.updateTheme}
-            updateHighlights={this.updateHighlights}
-            remove={this.removeTheme}
-            create={this.createTheme}
-            themes={this.props.themes}
+            update={updateTheme}
+            updateHighlights={updateHighlights}
+            remove={removeTheme}
+            create={createTheme}
+            themes={props.themes}
           />
           <Dropdown
             title="Language"
@@ -381,40 +382,39 @@ class Editor extends React.Component {
               LANGUAGE_MODE_HASH[DEFAULT_LANGUAGE]
             }
             list={LANGUAGES}
-            onChange={this.updateLanguage}
+            onChange={updateLanguage}
           />
           <div className="toolbar-second-row">
             <BackgroundSelect
-              onChange={this.updateBackground}
-              updateHighlights={this.updateHighlights}
+              onChange={updateBackground}
+              updateHighlights={updateHighlights}
               mode={backgroundMode}
               color={backgroundColor}
               image={backgroundImage}
-              carbonRef={this.carbonNode.current}
+              carbonRef={carbonNode.current}
             />
             <Settings
               {...config}
-              onChange={this.updateSetting}
-              resetDefaultSettings={this.resetDefaultSettings}
-              format={this.format}
-              applyPreset={this.applyPreset}
-              getCarbonImage={this.getCarbonImage}
+              onChange={updateSetting}
+              resetDefaultSettings={resetDefaultSettings}
+              format={format}
+              applyPreset={applyPreset}
+              getCarbonImage={getCarbonImage}
             />
             <div id="style-editor-button" />
             <div className="buttons">
-              <CopyMenu copyImage={this.copyImage} carbonRef={this.carbonNode.current} />
-              <TweetButton onClick={this.tweet} />
+              <CopyMenu copyImage={copyImage} carbonRef={carbonNode.current} />
+              <TweetButton onClick={tweet} />
               <ExportMenu
-                onChange={this.updateSetting}
-                exportImage={this.exportImage}
+                onChange={updateSetting}
+                exportImage={exportImage}
                 exportSize={exportSize}
                 backgroundImage={backgroundImage}
               />
             </div>
           </div>
         </Toolbar>
-
-        <Dropzone accept="image/*, text/*, application/*" onDrop={this.onDrop}>
+        <Dropzone accept="image/*, text/*, application/*" onDrop={onDrop}>
           {({ canDrop }) => (
             <Overlay
               isOver={canDrop}
@@ -423,11 +423,11 @@ class Editor extends React.Component {
               {/*key ensures Carbon's internal language state is updated when it's changed by Dropdown*/}
               <Carbon
                 key={language}
-                ref={this.carbonNode}
-                config={this.state}
-                onChange={this.updateCode}
-                updateWidth={this.updateWidth}
-                loading={this.state.loading}
+                ref={carbonNode}
+                config={state}
+                onChange={updateCode}
+                updateWidth={updateWidth}
+                loading={state.loading}
                 theme={theme}
               >
                 {code != null ? code : DEFAULT_CODE}
@@ -435,13 +435,13 @@ class Editor extends React.Component {
             </Overlay>
           )}
         </Dropzone>
-        {this.props.snippet && (
+        {props.snippet && (
           <SnippetToolbar
-            snippet={this.props.snippet}
-            onCreate={this.handleSnippetCreate}
-            onDelete={this.handleSnippetDelete}
+            snippet={props.snippet}
+            onCreate={handleSnippetCreate}
+            onDelete={handleSnippetDelete}
             name={config.name}
-            onChange={this.updateSetting}
+            onChange={updateSetting}
           />
         )}
         <FontFace {...config} />
@@ -475,7 +475,6 @@ class Editor extends React.Component {
         </style>
       </div>
     )
-  }
 }
 
 Editor.defaultProps = {
@@ -484,3 +483,4 @@ Editor.defaultProps = {
 }
 
 export default Editor
+
